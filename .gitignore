@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.nx/
+.env
+.env.*
+!.env.example
+apps/api/src/generated/
+coverage/
+*.log
+.DS_Store

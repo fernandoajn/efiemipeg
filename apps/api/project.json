@@ -1,0 +1,41 @@
+{
+  "name": "api",
+  "projectType": "application",
+  "sourceRoot": "apps/api/src",
+  "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "options": { "command": "prisma generate" }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["generate"],
+      "inputs": ["default", "{workspaceRoot}/prisma/schema.prisma"],
+      "outputs": ["{workspaceRoot}/dist/apps/api"],
+      "options": { "command": "tsc -p apps/api/tsconfig.app.json" }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "parallel": true,
+        "commands": [
+          "tsc -p apps/api/tsconfig.app.json --watch --preserveWatchOutput",
+          "node --watch dist/apps/api/main.js"
+        ]
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["generate"],
+      "inputs": ["default", "{workspaceRoot}/prisma/schema.prisma"],
+      "options": { "command": "tsc -p apps/api/tsconfig.app.json --noEmit" }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "inputs": ["default", "{workspaceRoot}/prisma/schema.prisma"],
+      "options": { "command": "node --test apps/api/test/*.test.cjs" }
+    }
+  }
+}
