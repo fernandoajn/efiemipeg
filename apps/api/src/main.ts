@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import cookieParser from "cookie-parser";
 import { Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
@@ -9,7 +10,12 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService<Environment, true>);
   app.setGlobalPrefix("api");
-  app.enableCors({ origin: config.get("WEB_ORIGIN", { infer: true }) });
+  app.use(cookieParser());
+  app.enableCors({
+    origin: config.get("WEB_ORIGIN", { infer: true }),
+    credentials: true,
+    allowedHeaders: ["Content-Type", "X-Requested-With"],
+  });
   app.enableShutdownHooks();
   const port = config.get("API_PORT", { infer: true });
   const host = config.get("API_HOST", { infer: true });

@@ -5,6 +5,7 @@ const {
 } = require("../../../dist/apps/api/config/environment");
 
 const valid = {
+  JWT_SECRET: "a".repeat(64),
   WEB_ORIGIN: "http://localhost:4200",
   DATABASE_URL: "postgresql://user:password@localhost:5432/test",
   REDIS_URL: "redis://localhost:6379",
@@ -25,6 +26,9 @@ it("parses numeric settings and applies API defaults", () => {
 
 it("rejects missing secrets, invalid ports, protocols, and origins before startup", () => {
   for (const override of [
+    { JWT_SECRET: undefined },
+    { JWT_SECRET: "weak-secret" },
+    { JWT_TTL_SECONDS: 0 },
     { S3_SECRET_ACCESS_KEY: undefined },
     { API_PORT: "not-a-number" },
     { API_PORT: "70000" },

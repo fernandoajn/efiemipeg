@@ -6,6 +6,13 @@ const environmentSchema = z.object({
     .default("development"),
   API_HOST: z.string().min(1).default("127.0.0.1"),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  JWT_SECRET: z
+    .string()
+    .regex(
+      /^[a-f0-9]{64,}$/i,
+      "Must contain at least 32 random bytes in hex; run npm run setup",
+    ),
+  JWT_TTL_SECONDS: z.coerce.number().int().min(300).max(86400).default(3600),
   WEB_ORIGIN: z
     .url()
     .refine(
