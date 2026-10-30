@@ -2,13 +2,14 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { DeleteObjectsCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 
-// Exercises progressive playback through the Vite proxy, exactly as the browser reaches it.
+// Exercises progressive playback and HLS processing through the Vite proxy, exactly as the browser reaches them.
+// Requires the API, the web dev server, and the processing worker to be running.
 const web = `http://127.0.0.1:${process.env.WEB_PORT || 4200}/api`;
 const origin = process.env.WEB_ORIGIN || "http://localhost:4200";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 3000 });
@@ -37,7 +38,8 @@ async function register(email) {
 
 try {
   const file = join(directory, "smoke.mp4");
-  execFileSync("ffmpeg", ["-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=24", "-t", "4", "-pix_fmt", "yuv420p", "-movflags", "+faststart", file]);
+  execFileSync("ffmpeg", ["-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+    "-t", "10", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", "-movflags", "+faststart", file]);
   const bytes = readFileSync(file);
   const [owner, stranger] = [await register(emails[0]), await register(emails[1])];
 
@@ -81,10 +83,57 @@ try {
   assert.equal((await call(stream)).status, 401);
   assert.equal((await call(stream, { cookie: stranger })).status, 404);
   console.log("PASS streams require a session and are private to their owner");
+
+  let processed = video;
+  for (const deadline = Date.now() + 180000; processed.processing?.status !== "READY"; ) {
+    assert.notEqual(processed.processing?.status, "FAILED", processed.processing?.error);
+    assert.ok(Date.now() < deadline, "Processing did not finish in time. Is the worker running (npm run dev)?");
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    processed = (await (await call(`/videos/${video.id}`, { cookie: owner })).json()).video;
+  }
+  assert.equal(processed.metadata.width, 1920);
+  assert.equal(processed.metadata.audioCodec, "aac");
+  console.log(`PASS the worker probed and processed the upload (${processed.metadata.durationSeconds.toFixed(1)} s, ${processed.metadata.videoCodec})`);
+
+  const media = `/videos/${video.id}/media/${processed.mediaVersion}`;
+  const master = await call(`${media}/master.m3u8`, { cookie: owner });
+  assert.equal(master.status, 200);
+  assert.equal(master.headers.get("content-type"), "application/vnd.apple.mpegurl");
+  const variants = [...(await master.text()).matchAll(/RESOLUTION=(\d+x\d+),CODECS="([^"]+)"\s+(\S+)/g)];
+  assert.deepEqual(variants.map(([, resolution]) => resolution), ["640x360", "1280x720", "1920x1080"]);
+  for (const [, , codecs] of variants) assert.match(codecs, /^avc1\.[0-9a-f]+,mp4a\.40\.2$/);
+  console.log("PASS master playlist lists the 360p, 720p, and 1080p ladder with H.264/AAC codecs");
+
+  const timelines = [];
+  for (const [, , , uri] of variants) {
+    const playlist = await (await call(`${media}/${uri}`, { cookie: owner })).text();
+    assert.match(playlist, /#EXT-X-PLAYLIST-TYPE:VOD/);
+    assert.match(playlist, /#EXT-X-ENDLIST/);
+    timelines.push([...playlist.matchAll(/#EXTINF:([\d.]+)/g)].map(([, duration]) => Number(duration).toFixed(2)));
+  }
+  for (const timeline of timelines.slice(1)) assert.deepEqual(timeline, timelines[0]);
+  console.log(`PASS segment boundaries align across renditions (${timelines[0].join(" + ")} s)`);
+
+  const segment = await call(`${media}/${variants[1][3].replace("index.m3u8", "segment_0000.ts")}`, { cookie: owner });
+  assert.equal(segment.status, 200);
+  assert.equal(segment.headers.get("content-type"), "video/mp2t");
+  const segmentFile = join(directory, "segment.ts");
+  writeFileSync(segmentFile, Buffer.from(await segment.arrayBuffer()));
+  const codecs = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name", "-of", "json", segmentFile], { encoding: "utf8" })).streams.map(stream => stream.codec_name);
+  assert.deepEqual(codecs.sort(), ["aac", "h264"]);
+  const thumbnail = await call(`${media}/thumbnail.jpg`, { cookie: owner });
+  assert.equal(thumbnail.headers.get("content-type"), "image/jpeg");
+  assert.deepEqual([...new Uint8Array(await thumbnail.arrayBuffer()).slice(0, 2)], [0xff, 0xd8]);
+  console.log("PASS segments decode as H.264 + AAC and the thumbnail is a JPEG");
+
+  assert.equal((await call(`${media}/master.m3u8`)).status, 401);
+  assert.equal((await call(`${media}/master.m3u8`, { cookie: stranger })).status, 404);
+  assert.equal((await call(`/videos/${video.id}/media/${randomUUID()}/master.m3u8`, { cookie: owner })).status, 404);
+  console.log("PASS HLS delivery requires the owner’s session and the current media version");
 } finally {
   if (userIds.length) {
     for (const userId of userIds) {
-      for (const prefix of [`uploads/${userId}/`, `originals/${userId}/`]) {
+      for (const prefix of [`uploads/${userId}/`, `originals/${userId}/`, `media/${userId}/`]) {
         const listed = await s3.send(new ListObjectsV2Command({ Bucket: process.env.S3_BUCKET, Prefix: prefix }));
         if (listed.Contents?.length) await s3.send(new DeleteObjectsCommand({ Bucket: process.env.S3_BUCKET, Delete: { Objects: listed.Contents.map(({ Key }) => ({ Key })) } }));
       }

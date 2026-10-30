@@ -14,6 +14,7 @@ const { AUTH_COOKIE, JWT_ISSUER, JWT_AUDIENCE } = require("../../../dist/apps/ap
 const { PrismaService } = require("../../../dist/apps/api/infrastructure/prisma.service");
 const { RedisService } = require("../../../dist/apps/api/infrastructure/redis.service");
 const { StorageService } = require("../../../dist/apps/api/infrastructure/storage.service");
+const { ProcessingQueue } = require("../../../dist/apps/api/processing/processing-queue.service");
 const { parseByteRange, rangeStillValid } = require("../../../dist/apps/api/videos/byte-range");
 
 describe("Byte range parsing", () => {
@@ -69,9 +70,15 @@ describe("Video streaming HTTP contract", () => {
     } },
     video: { findFirst: async ({ where }) => { const video = videos.get(where.id); return video?.userId === where.userId ? video : null; } },
   };
+  const mediaObjects = new Map();
   const storage = { bucket: "videos", client: { send: async command => {
     reads.push(command.input);
     if (failStorage) throw Object.assign(new Error("down"), { $metadata: { httpStatusCode: 500 } });
+    if (command.input.Key.startsWith("media/")) {
+      const object = mediaObjects.get(command.input.Key);
+      if (!object) throw Object.assign(new Error("missing"), { $metadata: { httpStatusCode: 404 } });
+      return { Body: Readable.from([object]), ContentLength: object.length, ETag: '"m"' };
+    }
     const match = /^bytes=(\d+)-(\d+)$/.exec(command.input.Range ?? "");
     const slice = match ? bytes.subarray(Number(match[1]), Number(match[2]) + 1) : bytes;
     return { Body: Readable.from([slice]), ContentLength: slice.length };
@@ -97,13 +104,14 @@ describe("Video streaming HTTP contract", () => {
       .overrideProvider(PrismaService).useValue(prisma)
       .overrideProvider(RedisService).useValue({})
       .overrideProvider(StorageService).useValue(storage)
+      .overrideProvider(ProcessingQueue).useValue({ enqueue: async () => true })
       .compile();
     app = module.createNestApplication();
     app.setGlobalPrefix("api");
     app.use(cookieParser());
     await app.init();
   });
-  beforeEach(() => { videos.clear(); reads = []; failStorage = false; });
+  beforeEach(() => { videos.clear(); mediaObjects.clear(); reads = []; failStorage = false; });
   after(async () => { await app?.close(); });
 
   it("requires a signed-in session", async () => {
@@ -187,5 +195,44 @@ describe("Video streaming HTTP contract", () => {
     const response = await get(uploaded().id).set("Range", "bytes=0-1").expect(503);
     assert.equal(response.headers["content-range"], undefined);
     assert.match(response.headers["content-type"], /application\/json/);
+  });
+
+  describe("authorized HLS delivery", () => {
+    const version = randomUUID();
+    const ready = () => {
+      const video = uploaded({ processingStatus: "READY", mediaVersion: version, mediaPrefix: `media/${users[0]}/v/${version}` });
+      mediaObjects.set(`${video.mediaPrefix}/master.m3u8`, Buffer.from("#EXTM3U\nv0/index.m3u8\n"));
+      mediaObjects.set(`${video.mediaPrefix}/v0/segment_0000.ts`, Buffer.from("segment"));
+      mediaObjects.set(`${video.mediaPrefix}/thumbnail.jpg`, Buffer.from("jpeg"));
+      return video;
+    };
+    const media = (video, path, userId = users[0]) => request(app.getHttpServer()).get(`/api/videos/${video.id}/media/${version}/${path}`).set("Cookie", cookieFor(userId));
+
+    it("serves playlists, segments, and thumbnails with immutable private caching and correct types", async () => {
+      const video = ready();
+      for (const [path, type] of [["master.m3u8", "application/vnd.apple.mpegurl"], ["v0/segment_0000.ts", "video/mp2t"], ["thumbnail.jpg", "image/jpeg"]]) {
+        const response = await media(video, path).buffer(true).expect(200);
+        assert.equal(response.headers["content-type"], type, path);
+        assert.equal(response.headers["cache-control"], "private, max-age=31536000, immutable");
+        assert.equal(reads.at(-1).Key, `${video.mediaPrefix}/${path}`);
+      }
+    });
+
+    it("requires a session, ownership, a ready video, and the current media version", async () => {
+      const video = ready();
+      await request(app.getHttpServer()).get(`/api/videos/${video.id}/media/${version}/master.m3u8`).expect(401);
+      await media(video, "master.m3u8", users[1]).expect(404);
+      await request(app.getHttpServer()).get(`/api/videos/${video.id}/media/${randomUUID()}/master.m3u8`).set("Cookie", cookieFor(users[0])).expect(404);
+      const processing = uploaded({ processingStatus: "PROCESSING", mediaVersion: version, mediaPrefix: "media/x" });
+      await media(processing, "master.m3u8").expect(404);
+      assert.equal(reads.length, 0);
+    });
+
+    it("serves only known HLS file names and maps a missing object to 404", async () => {
+      const video = ready();
+      for (const path of ["source", "v0/..%2F..%2Fsecret.ts", "v0/segment_0000.mp4", "v0/index.m3u8.bak", "originals.m3u8"]) await media(video, path).expect(404);
+      assert.equal(reads.length, 0);
+      await media(video, "v1/index.m3u8").expect(404);
+    });
   });
 });
