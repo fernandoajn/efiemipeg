@@ -1,6 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { createReadStream, createWriteStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Environment } from "../config/environment";
 import { StorageService } from "../infrastructure/storage.service";
@@ -44,6 +48,36 @@ export class VideoStorageService {
     return this.storage.client.send(new GetObjectCommand({
       Bucket: this.storage.bucket, Key: key, IfMatch: etag, Range: range && `bytes=${range.start}-${range.end}`,
     }), { abortSignal: signal });
+  }
+
+  readObject(key: string, signal: AbortSignal) {
+    return this.storage.client.send(new GetObjectCommand({ Bucket: this.storage.bucket, Key: key }), { abortSignal: signal });
+  }
+
+  async download(key: string, etag: string, path: string, signal: AbortSignal): Promise<void> {
+    const object = await this.storage.client.send(new GetObjectCommand({ Bucket: this.storage.bucket, Key: key, IfMatch: etag }), { abortSignal: signal });
+    if (!(object.Body instanceof Readable)) throw new Error("Storage returned no body");
+    await pipeline(object.Body, createWriteStream(path), { signal });
+  }
+
+  async upload(key: string, path: string, contentType: string, signal: AbortSignal): Promise<void> {
+    const { size } = await stat(path);
+    await this.storage.client.send(new PutObjectCommand({
+      Bucket: this.storage.bucket, Key: key, Body: createReadStream(path), ContentLength: size, ContentType: contentType,
+    }), { abortSignal: signal });
+  }
+
+  async removePrefix(prefix: string): Promise<void> {
+    let token: string | undefined;
+    do {
+      const listed = await this.storage.client.send(new ListObjectsV2Command({ Bucket: this.storage.bucket, Prefix: prefix, ContinuationToken: token }), { abortSignal: AbortSignal.timeout(10000) });
+      if (listed.Contents?.length) {
+        await this.storage.client.send(new DeleteObjectsCommand({
+          Bucket: this.storage.bucket, Delete: { Objects: listed.Contents.map(({ Key }) => ({ Key })), Quiet: true },
+        }), { abortSignal: AbortSignal.timeout(10000) });
+      }
+      token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (token);
   }
 
   async copy(source: string, target: string, etag: string) {

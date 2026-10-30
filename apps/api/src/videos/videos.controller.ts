@@ -35,6 +35,11 @@ export class VideosController {
   @Header("Cache-Control", "no-store")
   complete(@Req() request: AuthRequest, @Param("id", ParseUUIDPipe) id: string) { return this.videos.complete(request.user.id, id); }
 
+  @Post(":id/process")
+  @HttpCode(200)
+  @Header("Cache-Control", "no-store")
+  reprocess(@Req() request: AuthRequest, @Param("id", ParseUUIDPipe) id: string) { return this.videos.reprocess(request.user.id, id); }
+
   @Post(":id/cancel")
   @HttpCode(200)
   @Header("Cache-Control", "no-store")

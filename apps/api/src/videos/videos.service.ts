@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Environment } from "../config/environment";
 import { PrismaService } from "../infrastructure/prisma.service";
 import { Video } from "../generated/prisma/client";
+import { ProcessingQueue } from "../processing/processing-queue.service";
 import { VideoStorageService } from "./video-storage.service";
 import { matchesVideoContainer } from "./video.validation";
 
@@ -13,6 +14,13 @@ function publicVideo(video: Video) {
     id: video.id, title: video.title, originalName: video.originalName, mimeType: video.mimeType,
     sizeBytes: video.sizeBytes, status: video.status, error: video.error,
     uploadExpiresAt: video.uploadExpiresAt, createdAt: video.createdAt, uploadedAt: video.uploadedAt,
+    processing: video.processingStatus && { status: video.processingStatus, progress: video.processingProgress, error: video.processingError },
+    // Clients build media URLs from the version; a new version means new URLs, so cached segments never go stale.
+    mediaVersion: video.processingStatus === "READY" ? video.mediaVersion : null,
+    metadata: video.durationSeconds === null ? null : {
+      durationSeconds: video.durationSeconds, width: video.width, height: video.height,
+      videoCodec: video.videoCodec, audioCodec: video.audioCodec, renditions: video.renditions,
+    },
   };
 }
 function storageStatus(error: unknown): number | undefined {
@@ -21,7 +29,10 @@ function storageStatus(error: unknown): number | undefined {
 
 @Injectable()
 export class VideosService {
-  constructor(private readonly prisma: PrismaService, private readonly storage: VideoStorageService, private readonly config: ConfigService<Environment, true>) {}
+  constructor(
+    private readonly prisma: PrismaService, private readonly storage: VideoStorageService,
+    private readonly queue: ProcessingQueue, private readonly config: ConfigService<Environment, true>,
+  ) {}
 
   options() {
     return { maxVideoBytes: this.config.get("MAX_VIDEO_BYTES", { infer: true }), formats: ["video/mp4", "video/quicktime", "video/webm"] };
@@ -75,9 +86,11 @@ export class VideosService {
       if (stored.ContentLength !== video.sizeBytes || stored.ContentType !== video.mimeType || !stored.ETag) throw new Error("Copy verification failed");
       const saved = await this.prisma.video.updateMany({ where: { id, userId, status: "VERIFYING", verificationToken: token }, data: {
         status: "UPLOADED", objectKey: finalKey, etag: stored.ETag, uploadedAt: new Date(), error: null, verificationToken: null, verificationStartedAt: null,
+        processingStatus: "QUEUED", processingProgress: 0, processingError: null,
       } });
       if (!saved.count) throw new ConflictException("Verification was retried. Refresh your library.");
       promoted = true;
+      await this.queue.enqueue(id);
       await this.cleanup(video.uploadKey);
       return this.get(userId, id);
     } catch (error) {
@@ -105,6 +118,22 @@ export class VideosService {
     if (!changed.count) throw new ConflictException("An uploaded video or active verification cannot be canceled.");
     await this.cleanup(video.uploadKey);
     return this.get(userId, id);
+  }
+
+  async reprocess(userId: string, id: string) {
+    const changed = await this.prisma.video.updateMany({
+      where: { id, userId, status: "UPLOADED", processingStatus: "FAILED" },
+      data: { processingStatus: "QUEUED", processingProgress: 0, processingError: null },
+    });
+    if (!changed.count) { await this.owned(userId, id); throw new ConflictException("Only a video whose processing failed can be retried."); }
+    await this.queue.enqueue(id);
+    return this.get(userId, id);
+  }
+
+  async media(userId: string, id: string, version: string) {
+    const video = await this.owned(userId, id);
+    if (video.processingStatus !== "READY" || video.mediaVersion !== version || !video.mediaPrefix) throw new NotFoundException("Video not found.");
+    return video.mediaPrefix;
   }
 
   async playable(userId: string, id: string) {

@@ -38,6 +38,9 @@ const environmentSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().min(1),
   S3_SECRET_ACCESS_KEY: z.string().min(8),
   S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/),
+  FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
+  FFPROBE_PATH: z.string().min(1).default("ffprobe"),
+  PROCESSING_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
 });
 
 export type Environment = z.infer<typeof environmentSchema>;

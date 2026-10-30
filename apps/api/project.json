@@ -21,7 +21,19 @@
         "parallel": true,
         "commands": [
           "tsc -p apps/api/tsconfig.app.json --watch --preserveWatchOutput",
-          "node --watch dist/apps/api/main.js"
+          "node --watch dist/apps/api/main.js",
+          "node --watch dist/apps/api/worker.js"
+        ]
+      }
+    },
+    "serve-worker": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "parallel": true,
+        "commands": [
+          "tsc -p apps/api/tsconfig.app.json --watch --preserveWatchOutput",
+          "node --watch dist/apps/api/worker.js"
         ]
       }
     },
