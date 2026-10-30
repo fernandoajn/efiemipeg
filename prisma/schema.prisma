@@ -20,6 +20,14 @@ model User {
   videos       Video[]
 }
 
+// Lifecycle of the HLS rendition, independent of the upload lifecycle above it.
+enum ProcessingStatus {
+  QUEUED
+  PROCESSING
+  READY
+  FAILED
+}
+
 enum VideoStatus {
   UPLOADING
   VERIFYING
@@ -45,11 +53,26 @@ model Video {
   verificationToken     String?     @db.Uuid
   verificationStartedAt DateTime?
   uploadedAt            DateTime?
-  createdAt             DateTime    @default(now())
-  updatedAt             DateTime    @updatedAt
+  processingStatus      ProcessingStatus?
+  processingProgress    Int               @default(0)
+  processingError       String?
+  processingToken       String?           @db.Uuid
+  processingHeartbeatAt DateTime?
+  mediaVersion          String?           @db.Uuid
+  mediaPrefix           String?           @unique
+  durationSeconds       Float?
+  width                 Int?
+  height                Int?
+  videoCodec            String?
+  audioCodec            String?
+  renditions            Json?
+  processedAt           DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   @@index([userId, createdAt, id])
   @@index([status, uploadExpiresAt])
+  @@index([processingStatus, processingHeartbeatAt])
 }
 
 model Session {

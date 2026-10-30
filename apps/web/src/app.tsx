@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "./auth/auth-context";
 import { AuthPage } from "./auth/auth-page";
 import { AccountPage } from "./account";
 import { Foundation } from "./foundation";
+import { WatchPage } from "./videos/watch";
 import "./auth.css";
 
 function SessionGate() {
@@ -53,6 +54,7 @@ export function App() {
             <Route element={<PrivateRoute />}>
               <Route path="/" element={<AccountPage />} />
               <Route path="/infrastructure" element={<Foundation />} />
+              <Route path="/videos/:id" element={<WatchPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../auth/api";
 import { uploadFile } from "./upload";
 import "./library.css";
 
 type Status = "UPLOADING" | "VERIFYING" | "UPLOADED" | "FAILED" | "CANCELED";
-interface Video {
+export interface Video {
   id: string; title: string; originalName: string; mimeType: string; sizeBytes: number;
   status: Status; error: string | null; createdAt: string; uploadedAt: string | null; uploadExpiresAt: string;
 }
@@ -149,10 +150,10 @@ export function Library({ onBusy }: { onBusy: (busy: boolean) => void }) {
     {loading && !videos.length && <p className="library-notice" role="status">Loading your library…</p>}
     {!loading && !error && !videos.length && <div className="library-empty"><div className="empty-play" aria-hidden="true">▶</div><h2>Every collection starts<br />with a first frame.</h2><p>Choose your first video above. Only you can see the originals in your library.</p></div>}
     <div className="video-grid">{videos.map(video => <article className="video-card" key={video.id}>
-      <div className={`video-art status-${video.status.toLowerCase()}`}><span className="video-format">{video.originalName.split(".").pop()?.toUpperCase()}</span><span className="video-file-icon" aria-hidden="true">▤</span><span className={`video-status ${video.status.toLowerCase()}`}>{labels[video.status]}</span></div>
+      <div className={`video-art status-${video.status.toLowerCase()}`}><span className="video-format">{video.originalName.split(".").pop()?.toUpperCase()}</span>{video.status === "UPLOADED" ? <Link className="video-play" to={`/videos/${video.id}`} aria-label={`Watch ${video.title}`}>▶</Link> : <span className="video-file-icon" aria-hidden="true">▤</span>}<span className={`video-status ${video.status.toLowerCase()}`}>{labels[video.status]}</span></div>
       <div className="video-info"><h3 title={video.title}>{video.title}</h3><p className="video-filename" title={video.originalName}>{video.originalName}</p><div className="video-meta"><span>{formatBytes(video.sizeBytes)}</span><span>{new Date(video.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span></div>
       {video.error && <p className="video-error">{video.error}</p>}
-      {video.status === "UPLOADED" ? <p className="video-note">Original saved · playback comes next</p> : (video.status === "UPLOADING" || video.status === "VERIFYING") ? <button className="refresh check-upload" disabled={busy || !!checking} onClick={() => void check(video.id)}>{checking === video.id ? "Checking…" : "Check upload"}</button> : <p className="video-note">Choose the file above to upload again.</p>}
+      {video.status === "UPLOADED" ? <Link className="refresh watch-link" to={`/videos/${video.id}`}>▶ Watch</Link> : (video.status === "UPLOADING" || video.status === "VERIFYING") ? <button className="refresh check-upload" disabled={busy || !!checking} onClick={() => void check(video.id)}>{checking === video.id ? "Checking…" : "Check upload"}</button> : <p className="video-note">Choose the file above to upload again.</p>}
       </div>
     </article>)}</div>
     {cursor && <button className="refresh load-more" disabled={loading || busy || !!checking} onClick={() => void load(cursor)}>{loading ? "Loading…" : "Load more videos"}</button>}

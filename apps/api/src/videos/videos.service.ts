@@ -107,6 +107,14 @@ export class VideosService {
     return this.get(userId, id);
   }
 
+  async playable(userId: string, id: string) {
+    const video = await this.owned(userId, id);
+    if (video.status !== "UPLOADED" || !video.objectKey || !video.etag || !video.uploadedAt) {
+      throw new ConflictException("This video is not ready for playback.");
+    }
+    return { ...video, objectKey: video.objectKey, etag: video.etag, uploadedAt: video.uploadedAt };
+  }
+
   private async owned(userId: string, id: string) {
     const video = await this.prisma.video.findFirst({ where: { id, userId } });
     if (!video) throw new NotFoundException("Video not found.");

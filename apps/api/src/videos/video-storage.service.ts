@@ -39,6 +39,13 @@ export class VideoStorageService {
     return result.Body?.transformToByteArray() ?? new Uint8Array();
   }
 
+  // The caller validated the range against the stored size; IfMatch guarantees bytes from the verified original.
+  read(key: string, etag: string, range: { start: number; end: number } | undefined, signal: AbortSignal) {
+    return this.storage.client.send(new GetObjectCommand({
+      Bucket: this.storage.bucket, Key: key, IfMatch: etag, Range: range && `bytes=${range.start}-${range.end}`,
+    }), { abortSignal: signal });
+  }
+
   async copy(source: string, target: string, etag: string) {
     return this.storage.client.send(new CopyObjectCommand({
       Bucket: this.storage.bucket, Key: target,
