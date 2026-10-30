@@ -22,7 +22,7 @@ export class StorageService implements OnModuleDestroy {
       maxAttempts: 1,
       requestHandler: new NodeHttpHandler({
         connectionTimeout: 2000,
-        requestTimeout: 2500,
+        requestTimeout: 60000,
       }),
     });
   }

@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "./auth/auth-context";
+import { Library } from "./videos/library";
 
 export function AccountPage() {
   const { user, signOut } = useAuth();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   if (!user) return null;
   async function logout() {
     setBusy(true);
@@ -58,7 +60,7 @@ export function AccountPage() {
           </div>
           <button
             className="refresh signout-button"
-            disabled={busy}
+            disabled={busy || uploading}
             onClick={() => void logout()}
           >
             {busy ? "Signing out…" : "Sign out"}
@@ -78,30 +80,14 @@ export function AccountPage() {
                 <span>.</span>
               </h1>
               <p>
-                Your account is ready. This is where your video library will
-                grow.
+                Your videos, in one private place. Add an original to grow your collection.
               </p>
             </div>
             <span className="account-initial" aria-hidden="true">
               {(user.name || user.email).charAt(0).toUpperCase()}
             </span>
           </div>
-          <section id="library" className="library-empty">
-            <div className="empty-play" aria-hidden="true">
-              ▶
-            </div>
-            <span className="eyebrow">YOUR LIBRARY</span>
-            <h2>
-              Every collection starts
-              <br />
-              with a first frame.
-            </h2>
-            <p>
-              You’re all set for the next chapter. Video uploads and playback
-              are coming in a future phase.
-            </p>
-            <span className="coming-badge">Uploads coming next</span>
-          </section>
+          <Library onBusy={setUploading} />
           <section id="profile" className="profile-section">
             <div className="section-heading">
               <div>

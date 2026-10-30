@@ -17,6 +17,39 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   sessions     Session[]
+  videos       Video[]
+}
+
+enum VideoStatus {
+  UPLOADING
+  VERIFYING
+  UPLOADED
+  FAILED
+  CANCELED
+}
+
+model Video {
+  id                    String      @id @default(uuid()) @db.Uuid
+  userId                String      @db.Uuid
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                 String
+  originalName          String
+  mimeType              String
+  sizeBytes             Int
+  status                VideoStatus @default(UPLOADING)
+  uploadKey             String      @unique
+  objectKey             String?     @unique
+  etag                  String?
+  error                 String?
+  uploadExpiresAt       DateTime
+  verificationToken     String?     @db.Uuid
+  verificationStartedAt DateTime?
+  uploadedAt            DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  @@index([userId, createdAt, id])
+  @@index([status, uploadExpiresAt])
 }
 
 model Session {

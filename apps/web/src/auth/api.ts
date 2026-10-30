@@ -15,7 +15,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, body?: unknown): Promise<T> {
+export async function api<T>(path: string, body?: unknown, timeoutMs = 10000): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
@@ -30,7 +30,7 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
               "X-Requested-With": "efiemipeg",
             },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new ApiError(

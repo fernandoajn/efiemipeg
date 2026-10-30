@@ -53,6 +53,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Run npm run setup first}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run npm run setup first}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${WEB_ORIGIN:?Run npm run setup first}
     ports:
       - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"

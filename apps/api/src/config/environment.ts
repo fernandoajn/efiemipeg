@@ -32,6 +32,9 @@ const environmentSchema = z.object({
     .url()
     .refine((value) => /^https?:/.test(value), "Must be an HTTP(S) URL"),
   S3_REGION: z.string().min(1),
+  S3_PUBLIC_ENDPOINT: z.url().refine(value => /^https?:/.test(value), "Must be an HTTP(S) URL").optional(),
+  MAX_VIDEO_BYTES: z.coerce.number().int().min(1).max(2147483647).default(1073741824),
+  UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(3600),
   S3_ACCESS_KEY_ID: z.string().min(1),
   S3_SECRET_ACCESS_KEY: z.string().min(8),
   S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/),
